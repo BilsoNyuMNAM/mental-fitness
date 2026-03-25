@@ -1,0 +1,154 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required, immutable) - The user's unique ID.
+    //   - email: string (required) - The user's email address.
+    //   - displayName: string (optional) - The user's display name.
+    //   - photoURL: string (optional) - The user's profile picture URL.
+    //   - goal: string (optional) - The user's primary fitness goal.
+    //   - createdAt: timestamp (required, immutable) - When the user account was created.
+    //   - lastActiveDate: string (optional) - The date (YYYY-MM-DD) the user was last active.
+    //
+    // Collection: workouts
+    // Document ID: {workoutId}
+    // Fields:
+    //   - userId: string (required, immutable) - The ID of the user this workout belongs to.
+    //   - date: string (required, immutable) - The date (YYYY-MM-DD) this workout is scheduled for.
+    //   - title: string (required, immutable) - The title of the workout.
+    //   - description: string (required, immutable) - A brief description of the workout.
+    //   - videoUrl: string (optional, immutable) - A URL to a video demonstrating the workout.
+    //   - durationMinutes: number (required, immutable) - The estimated duration of the workout in minutes.
+    //   - completed: boolean (required) - Whether the user has completed this workout.
+    //   - completedAt: timestamp (optional) - When the user completed the workout.
+    //   - goal: string (required, immutable) - The goal this workout targets.
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}$");
+    }
+
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+             (request.resource.data[field] is string &&
+              request.resource.data[field].size() >= minLen &&
+              request.resource.data[field].size() <= maxLen);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'goal', 'createdAt', 'lastActiveDate', 'isAdmin']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             data.email is string && isValidEmail(data.email) &&
+             isValidOptionalString('displayName', 0, 100) &&
+             isValidOptionalString('photoURL', 0, 1000) &&
+             isValidOptionalString('goal', 0, 50) &&
+             data.createdAt is timestamp &&
+             (!( 'lastActiveDate' in data ) || isValidDateString(data.lastActiveDate));
+    }
+
+    function isValidWorkout(data) {
+      return hasOnlyAllowedFields(['userId', 'date', 'title', 'description', 'videoUrl', 'durationMinutes', 'completed', 'completedAt', 'goal']) &&
+             data.userId is string && data.userId.size() > 0 && data.userId.size() < 100 &&
+             isValidDateString(data.date) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 2000 &&
+             isValidOptionalString('videoUrl', 0, 1000) &&
+             data.durationMinutes is number && data.durationMinutes > 0 && data.durationMinutes <= 300 &&
+             data.completed is bool &&
+             (!( 'completedAt' in data ) || data.completedAt is timestamp) &&
+             data.goal is string && data.goal.size() > 0 && data.goal.size() < 50;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) &&
+                       hasRequiredFields(['uid', 'email', 'createdAt']) &&
+                       isValidUser(request.resource.data) &&
+                       uidUnchanged();
+      allow update: if isOwner(userId) &&
+                       isValidUser(request.resource.data) &&
+                       uidNotModified() &&
+                       areImmutableFieldsUnchanged(['createdAt']);
+      allow delete: if false; // Users cannot be deleted from client
+    }
+
+    match /workouts/{workoutId} {
+      // Users can read their own workouts and global workouts; admins can read all
+      allow read: if (isAuthenticated() && (request.auth.uid == resource.data.userId || resource.data.userId == 'global')) || isAdmin();
+      // Users can create workouts assigned to themselves; admins can create for any userId
+      allow create: if isAdmin() ||
+                       (isAuthenticated() &&
+                        request.auth.uid == request.resource.data.userId &&
+                        hasRequiredFields(['userId', 'date', 'title', 'description', 'durationMinutes', 'completed', 'goal']) &&
+                        isValidWorkout(request.resource.data));
+      // Users can update completion on their own workouts; admins can update anything
+      allow update: if isAdmin() ||
+                       (isAuthenticated() &&
+                        request.auth.uid == resource.data.userId &&
+                        request.auth.uid == request.resource.data.userId &&
+                        isValidWorkout(request.resource.data) &&
+                        areImmutableFieldsUnchanged(['userId', 'date', 'title', 'description', 'videoUrl', 'durationMinutes', 'goal']));
+      // Admins can delete any workout; users can delete their own
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.userId);
+    }
+
+    match /workout_completions/{completionId} {
+      allow read, update, delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+    }
+  }
+}

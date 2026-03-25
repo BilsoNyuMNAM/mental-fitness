@@ -1,0 +1,5 @@
+{
+  "name": "Daily Fitness",
+  "description": "A personal fitness and wellness app where users choose a goal, get fresh daily workouts tailored to that goal, complete them at their own pace, log their stats, and track simple progress over time.",
+  "requestFramePermissions": []
+}

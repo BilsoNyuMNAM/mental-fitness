@@ -1,0 +1,130 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the fitness app.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The user's unique ID."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "The user's email address."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The user's display name."
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "The user's profile picture URL."
+        },
+        "goal": {
+          "type": "string",
+          "enum": ["Build Muscle", "Weight Loss", "Improve Mood", ""],
+          "description": "The user's primary fitness goal."
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "description": "When the user account was created."
+        },
+        "lastActiveDate": {
+          "type": "string",
+          "description": "The date (YYYY-MM-DD) the user was last active."
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Workout": {
+      "title": "Workout",
+      "description": "A daily workout assigned to a user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The ID of the user this workout belongs to."
+        },
+        "date": {
+          "type": "string",
+          "description": "The date (YYYY-MM-DD) this workout is scheduled for."
+        },
+        "title": {
+          "type": "string",
+          "description": "The title of the workout."
+        },
+        "description": {
+          "type": "string",
+          "description": "A brief description of the workout."
+        },
+        "videoUrl": {
+          "type": "string",
+          "description": "A URL to a video demonstrating the workout."
+        },
+        "durationMinutes": {
+          "type": "number",
+          "description": "The estimated duration of the workout in minutes."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Whether the user has completed this workout."
+        },
+        "completedAt": {
+          "type": "timestamp",
+          "description": "When the user completed the workout."
+        },
+        "goal": {
+          "type": "string",
+          "description": "The goal this workout targets."
+        }
+      },
+      "required": ["userId", "date", "title", "description", "durationMinutes", "completed", "goal"]
+    },
+    "WorkoutCompletion": {
+      "title": "Workout Completion",
+      "description": "A record of a user completing a specific workout.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The ID of the user who completed the workout."
+        },
+        "workoutId": {
+          "type": "string",
+          "description": "The ID of the completed workout."
+        },
+        "date": {
+          "type": "string",
+          "description": "The date (YYYY-MM-DD) the workout was scheduled for."
+        },
+        "completedAt": {
+          "type": "timestamp",
+          "description": "When the user completed the workout."
+        }
+      },
+      "required": ["userId", "workoutId", "date", "completedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Stores user profiles and their fitness goals."
+    },
+    "/workouts/{workoutId}": {
+      "schema": {
+        "$ref": "#/entities/Workout"
+      },
+      "description": "Stores daily workouts assigned to users."
+    },
+    "/workout_completions/{completionId}": {
+      "schema": {
+        "$ref": "#/entities/WorkoutCompletion"
+      },
+      "description": "Stores completion records for workouts, separated per user."
+    }
+  }
+}
