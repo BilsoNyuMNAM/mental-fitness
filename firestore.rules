@@ -150,5 +150,18 @@ service cloud.firestore {
       allow read, update, delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
       allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
     }
+
+    match /custom_workouts/{workoutId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    match /favorite_workouts/{favoriteId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
   }
 }

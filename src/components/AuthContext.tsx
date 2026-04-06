@@ -1,6 +1,18 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db } from '../firebase';
-import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import {
+  onAuthStateChanged,
+  User,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+} from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 
@@ -19,7 +31,9 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   isAuthReady: boolean;
-  login: () => Promise<void>;
+  login: (rememberMe?: boolean) => Promise<void>;
+  loginWithEmail: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
+  signupWithEmail: (email: string, password: string, displayName: string, rememberMe?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   updateGoal: (goal: string) => Promise<void>;
 }
@@ -72,12 +86,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  const login = async () => {
+  const login = async (rememberMe = false) => {
     const provider = new GoogleAuthProvider();
     try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error('Login error:', error);
+      throw error;
+    }
+  };
+
+  const loginWithEmail = async (email: string, password: string, rememberMe = false) => {
+    try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      console.error('Email login error:', error);
+      throw error;
+    }
+  };
+
+  const signupWithEmail = async (email: string, password: string, displayName: string, rememberMe = false) => {
+    try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(result.user, { displayName });
+    } catch (error) {
+      console.error('Signup error:', error);
+      throw error;
     }
   };
 
@@ -97,7 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, isAuthReady, login, logout, updateGoal }}>
+    <AuthContext.Provider value={{ user, profile, isAuthReady, login, loginWithEmail, signupWithEmail, logout, updateGoal }}>
       {children}
     </AuthContext.Provider>
   );

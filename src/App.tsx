@@ -12,6 +12,9 @@ import Onboarding from './pages/Onboarding';
 import Home from './pages/Home';
 import WorkoutDetail from './pages/WorkoutDetail';
 import AdminDashboard from './pages/AdminDashboard';
+import WorkoutHistory from './pages/WorkoutHistory';
+import Landing from './pages/Landing';
+import MyWorkouts from './pages/MyWorkouts';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, profile, isAuthReady } = useAuth();
@@ -25,7 +28,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/landing" />;
   }
 
   if (profile && !profile.goal) {
@@ -41,6 +44,7 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
+            <Route path="/landing" element={<Landing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route
@@ -60,10 +64,26 @@ export default function App() {
               }
             />
             <Route
+              path="/history"
+              element={
+                <ProtectedRoute>
+                  <WorkoutHistory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/admin"
               element={
                 <ProtectedRoute>
                   <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/my-workouts"
+              element={
+                <ProtectedRoute>
+                  <MyWorkouts />
                 </ProtectedRoute>
               }
             />

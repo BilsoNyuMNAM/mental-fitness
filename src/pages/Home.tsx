@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../components/AuthContext';
-import { fetchTodayWorkouts, fetchProgressData, Workout } from '../services/workoutService';
+import { fetchTodayWorkouts, fetchProgressData, fetchCustomWorkouts, Workout, CustomWorkout } from '../services/workoutService';
 import { db } from '../firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { format, subDays, parseISO } from 'date-fns';
 import { Link } from 'react-router-dom';
-import { Activity, CheckCircle, Clock, Flame, PlayCircle, AlertCircle, LayoutDashboard } from 'lucide-react';
+import { Activity, CheckCircle, Clock, Flame, PlayCircle, AlertCircle, LayoutDashboard, Trophy, ChevronRight, Dumbbell, Star } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -15,6 +15,7 @@ export default function Home() {
   const [yesterdayWorkouts, setYesterdayWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const [progressData, setProgressData] = useState<{ date: string; completed: number }[]>([]);
+  const [customWorkouts, setCustomWorkouts] = useState<CustomWorkout[]>([]);
 
   useEffect(() => {
     if (!user || !profile?.goal) return;
@@ -37,6 +38,10 @@ export default function Home() {
         const last7Days = format(subDays(new Date(), 6), 'yyyy-MM-dd');
         const chartData = await fetchProgressData(user.uid, last7Days);
         setProgressData(chartData);
+
+        // Fetch user's custom workouts
+        const customs = await fetchCustomWorkouts(user.uid);
+        setCustomWorkouts(customs.filter(c => !profile.goal || c.goal?.toLowerCase().trim() === profile.goal.toLowerCase().trim()));
 
       } catch (error: any) {
         console.error('Error fetching workouts:', error);
@@ -169,6 +174,52 @@ export default function Home() {
           </div>
         </section>
 
+        {/* Custom Workouts */}
+        {customWorkouts.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Star className="w-5 h-5 text-amber-500" />
+                <h2 className="text-xl font-semibold text-zinc-900">Your Workouts</h2>
+              </div>
+              <Link to="/my-workouts" className="text-sm font-medium text-zinc-500 hover:text-zinc-900 transition-colors">
+                See all
+              </Link>
+            </div>
+
+            <div className="space-y-4">
+              {customWorkouts.slice(0, 3).map((workout) => (
+                <div
+                  key={workout.id}
+                  className="block bg-white border border-zinc-200 rounded-2xl p-5 transition-all hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 pr-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 text-zinc-700">
+                          <Clock className="w-3 h-3" />
+                          {workout.durationMinutes} min
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+                          <Star className="w-3 h-3" />
+                          Custom
+                        </span>
+                      </div>
+                      <h3 className="font-semibold text-lg mb-1 text-zinc-900">
+                        {workout.title}
+                      </h3>
+                      <p className="text-sm text-zinc-500 line-clamp-2">{workout.description}</p>
+                    </div>
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 bg-amber-100 text-amber-600">
+                      <Dumbbell className="w-6 h-6" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Progress Snapshot */}
         <section>
           <div className="flex items-center gap-2 mb-4">
@@ -176,19 +227,21 @@ export default function Home() {
             <h2 className="text-xl font-semibold text-zinc-900">7-Day Progress</h2>
           </div>
           <div className="bg-white border border-zinc-200 rounded-2xl p-6 h-64">
-            {progressData.length === 0 ? (
+            {progressData.reduce((sum, d) => sum + d.completed, 0) === 0 ? (
               <div className="w-full h-full flex flex-col items-center justify-center text-center">
                 <Flame className="w-8 h-8 text-zinc-200 mb-3" />
                 <p className="text-sm text-zinc-500">No progress data available yet.</p>
+                <p className="text-xs text-zinc-400 mt-1">Complete a workout to see your progress here.</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={progressData}>
                   <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#71717a' }} dy={10} />
-                  <YAxis hide domain={[0, 'dataMax + 1']} />
+                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#a1a1aa' }} width={30} domain={[0, 'dataMax + 1']} />
                   <Tooltip 
                     cursor={{ stroke: '#e4e4e7', strokeWidth: 2 }}
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    formatter={(value: number) => [`${value} workout${value !== 1 ? 's' : ''}`, 'Completed']}
                   />
                   <Line 
                     type="monotone" 
@@ -202,6 +255,44 @@ export default function Home() {
               </ResponsiveContainer>
             )}
           </div>
+        </section>
+
+        {/* Workout History Link */}
+        <section>
+          <Link
+            to="/history"
+            className="flex items-center justify-between bg-white border border-zinc-200 rounded-2xl p-5 hover:shadow-md transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                <Trophy className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-zinc-900">Workout History</h3>
+                <p className="text-sm text-zinc-500">See all the workouts you've completed</p>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-zinc-400 group-hover:text-zinc-900 transition-colors" />
+          </Link>
+        </section>
+
+        {/* My Workouts Link */}
+        <section>
+          <Link
+            to="/my-workouts"
+            className="flex items-center justify-between bg-white border border-zinc-200 rounded-2xl p-5 hover:shadow-md transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
+                <Dumbbell className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-zinc-900">My Workouts</h3>
+                <p className="text-sm text-zinc-500">Create & manage your custom routines</p>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-zinc-400 group-hover:text-zinc-900 transition-colors" />
+          </Link>
         </section>
 
       </main>

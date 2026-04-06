@@ -108,6 +108,63 @@ export async function fetchProgressData(userId: string, startDate: string): Prom
   }
 }
 
+export interface CompletedWorkout extends Workout {
+  completionDate: string;
+  completionId: string;
+}
+
+/** Fetch all workouts a user has completed (for history) */
+export async function fetchCompletedWorkouts(userId: string): Promise<CompletedWorkout[]> {
+  try {
+    const completionsRef = collection(db, 'workout_completions');
+    const qCompletions = query(completionsRef, where('userId', '==', userId));
+    const completionsSnap = await getDocs(qCompletions);
+
+    if (completionsSnap.empty) return [];
+
+    const completions = completionsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as {
+      id: string;
+      userId: string;
+      workoutId: string;
+      date: string;
+      completedAt: any;
+    }[];
+
+    // Fetch unique workout docs
+    const uniqueWorkoutIds = [...new Set(completions.map(c => c.workoutId))];
+    const workoutDocs = await Promise.all(
+      uniqueWorkoutIds.map(async (wId) => {
+        const snap = await getDoc(doc(db, 'workouts', wId));
+        if (snap.exists()) return { id: snap.id, ...snap.data() } as Workout;
+        return null;
+      })
+    );
+    const workoutMap = new Map<string, Workout>();
+    workoutDocs.forEach(w => { if (w) workoutMap.set(w.id!, w); });
+
+    // Combine completions with workout data
+    const result: CompletedWorkout[] = completions
+      .map(c => {
+        const workout = workoutMap.get(c.workoutId);
+        if (!workout) return null;
+        return {
+          ...workout,
+          completed: true,
+          completionDate: c.date,
+          completionId: c.id,
+        };
+      })
+      .filter(Boolean) as CompletedWorkout[];
+
+    // Sort by completion date descending
+    result.sort((a, b) => b.completionDate.localeCompare(a.completionDate));
+    return result;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'workout_completions');
+    return [];
+  }
+}
+
 // ─── Admin-only functions ────────────────────────────────────────────────────
 
 /** Create a new workout (admin only) */
@@ -150,6 +207,167 @@ export async function fetchAllWorkouts(): Promise<Workout[]> {
   try {
     const snapshot = await getDocs(collection(db, 'workouts'));
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Workout));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'workouts');
+    return [];
+  }
+}
+
+// ─── Custom Workout functions ────────────────────────────────────────────────
+
+export interface CustomWorkout {
+  id?: string;
+  userId: string;
+  title: string;
+  description: string;
+  videoUrl?: string;
+  durationMinutes: number;
+  goal: string;
+  createdAt: any;
+}
+
+/** Create a custom workout */
+export async function createCustomWorkout(workout: Omit<CustomWorkout, 'id' | 'createdAt'>): Promise<string> {
+  try {
+    const ref = await addDoc(collection(db, 'custom_workouts'), {
+      ...workout,
+      createdAt: Timestamp.now(),
+    });
+    return ref.id;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, 'custom_workouts');
+    throw error;
+  }
+}
+
+/** Fetch all custom workouts for a user */
+export async function fetchCustomWorkouts(userId: string): Promise<CustomWorkout[]> {
+  try {
+    const q = query(collection(db, 'custom_workouts'), where('userId', '==', userId));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomWorkout));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'custom_workouts');
+    return [];
+  }
+}
+
+/** Update a custom workout */
+export async function updateCustomWorkout(workoutId: string, data: Partial<CustomWorkout>): Promise<void> {
+  try {
+    const ref = doc(db, 'custom_workouts', workoutId);
+    await updateDoc(ref, { ...data });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `custom_workouts/${workoutId}`);
+    throw error;
+  }
+}
+
+/** Delete a custom workout */
+export async function deleteCustomWorkout(workoutId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'custom_workouts', workoutId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `custom_workouts/${workoutId}`);
+    throw error;
+  }
+}
+
+// ─── Favorite Workout functions ──────────────────────────────────────────────
+
+export interface FavoriteWorkout {
+  id?: string;
+  userId: string;
+  workoutId: string;
+  source: 'global' | 'custom';
+  createdAt: any;
+}
+
+/** Add a workout to favorites */
+export async function addFavorite(userId: string, workoutId: string, source: 'global' | 'custom'): Promise<string> {
+  try {
+    const favoriteId = `${userId}_${workoutId}`;
+    const ref = doc(db, 'favorite_workouts', favoriteId);
+    await setDoc(ref, {
+      userId,
+      workoutId,
+      source,
+      createdAt: Timestamp.now(),
+    });
+    return favoriteId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, 'favorite_workouts');
+    throw error;
+  }
+}
+
+/** Remove a workout from favorites */
+export async function removeFavorite(userId: string, workoutId: string): Promise<void> {
+  try {
+    const favoriteId = `${userId}_${workoutId}`;
+    await deleteDoc(doc(db, 'favorite_workouts', favoriteId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, 'favorite_workouts');
+    throw error;
+  }
+}
+
+/** Check if a workout is favorited */
+export async function isFavorited(userId: string, workoutId: string): Promise<boolean> {
+  try {
+    const favoriteId = `${userId}_${workoutId}`;
+    const snap = await getDoc(doc(db, 'favorite_workouts', favoriteId));
+    return snap.exists();
+  } catch (error) {
+    return false;
+  }
+}
+
+/** Fetch all favorite workouts for a user, with full workout data */
+export async function fetchFavorites(userId: string): Promise<(Workout | CustomWorkout)[]> {
+  try {
+    const q = query(collection(db, 'favorite_workouts'), where('userId', '==', userId));
+    const snap = await getDocs(q);
+
+    if (snap.empty) return [];
+
+    const favorites = snap.docs.map(d => d.data() as FavoriteWorkout);
+    const results: (Workout | CustomWorkout)[] = [];
+
+    for (const fav of favorites) {
+      try {
+        const collectionName = fav.source === 'custom' ? 'custom_workouts' : 'workouts';
+        const workoutSnap = await getDoc(doc(db, collectionName, fav.workoutId));
+        if (workoutSnap.exists()) {
+          results.push({ id: workoutSnap.id, ...workoutSnap.data() } as Workout | CustomWorkout);
+        }
+      } catch {
+        // Workout may have been deleted, skip
+      }
+    }
+
+    return results;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'favorite_workouts');
+    return [];
+  }
+}
+
+/** Fetch all global workouts (for browsing/mix-and-match) */
+export async function fetchAllGlobalWorkouts(goal?: string): Promise<Workout[]> {
+  try {
+    const workoutsRef = collection(db, 'workouts');
+    const q = query(workoutsRef, where('userId', '==', 'global'));
+    const snap = await getDocs(q);
+
+    let workouts = snap.docs.map(d => ({ id: d.id, ...d.data() } as Workout));
+
+    if (goal) {
+      const lowerGoal = goal.toLowerCase().trim();
+      workouts = workouts.filter(w => w.goal?.toLowerCase().trim() === lowerGoal);
+    }
+
+    return workouts;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'workouts');
     return [];

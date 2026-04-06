@@ -11,7 +11,7 @@ import {
 import { format } from 'date-fns';
 import {
   LayoutDashboard, Plus, Pencil, Trash2, X, Save,
-  Clock, Target, Calendar, Link as LinkIcon, ChevronDown, ChevronUp, ArrowLeft,
+  Clock, Target, Calendar, Link as LinkIcon, ArrowLeft, Play,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -27,6 +27,20 @@ const emptyForm = (): Omit<Workout, 'id' | 'completed' | 'completedAt'> => ({
   userId: 'global',
 });
 
+/** Extract YouTube video ID from various URL formats */
+function getYouTubeId(url: string): string | null {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 export default function AdminDashboard() {
   const { profile } = useAuth();
   const navigate = useNavigate();
@@ -38,7 +52,6 @@ export default function AdminDashboard() {
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
 
   // Guard — redirect non-admins
@@ -57,16 +70,6 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => { load(); }, []);
-
-  // Group workouts by date
-  const grouped = workouts.reduce<Record<string, Workout[]>>((acc, w) => {
-    if (!acc[w.date]) acc[w.date] = [];
-    acc[w.date].push(w);
-    return acc;
-  }, {});
-
-  const toggleGroup = (date: string) =>
-    setExpandedGroups(prev => ({ ...prev, [date]: !prev[date] }));
 
   const openCreate = () => {
     setEditingId(null);
@@ -157,12 +160,12 @@ export default function AdminDashboard() {
       </header>
 
       {/* Main content */}
-      <main className="max-w-3xl mx-auto px-6 py-8 space-y-4">
+      <main className="max-w-4xl mx-auto px-6 py-8">
         {loading ? (
           <div className="flex items-center justify-center py-24">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900" />
           </div>
-        ) : Object.keys(grouped).length === 0 ? (
+        ) : workouts.length === 0 ? (
           <div className="text-center py-24">
             <div className="w-16 h-16 bg-zinc-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <LayoutDashboard className="w-8 h-8 text-zinc-400" />
@@ -178,83 +181,97 @@ export default function AdminDashboard() {
             </button>
           </div>
         ) : (
-          Object.entries(grouped).map(([date, group]) => {
-            const isOpen = expandedGroups[date] !== false; // default open
-            const formatted = format(new Date(date + 'T00:00:00'), 'EEEE, MMMM d, yyyy');
-            const completed = group.filter(w => w.completed).length;
-            return (
-              <div key={date} className="bg-white border border-zinc-200 rounded-2xl overflow-hidden">
-                {/* Group header */}
-                <button
-                  onClick={() => toggleGroup(date)}
-                  className="w-full flex items-center justify-between px-5 py-4 hover:bg-zinc-50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <Calendar className="w-4 h-4 text-zinc-400" />
-                    <span className="font-semibold text-zinc-900">{formatted}</span>
-                    <span className="text-xs font-medium bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full">
-                      {group.length} workout{group.length !== 1 ? 's' : ''} · {completed} done
-                    </span>
-                  </div>
-                  {isOpen ? <ChevronUp className="w-4 h-4 text-zinc-400" /> : <ChevronDown className="w-4 h-4 text-zinc-400" />}
-                </button>
-
-                {/* Workout cards */}
-                {isOpen && (
-                  <div className="divide-y divide-zinc-100">
-                    {group.map(w => (
-                      <div key={w.id} className="flex items-start gap-4 px-5 py-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="inline-flex items-center gap-1 text-xs font-medium bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full">
-                              <Clock className="w-3 h-3" />{w.durationMinutes} min
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-xs font-medium bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
-                              <Target className="w-3 h-3" />{w.goal}
-                            </span>
-                            {w.completed && (
-                              <span className="text-xs font-medium bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-                                ✓ Completed
-                              </span>
-                            )}
+          <div className="space-y-4">
+            {workouts.map(w => {
+              const ytId = getYouTubeId(w.videoUrl || '');
+              const formattedDate = format(new Date(w.date + 'T00:00:00'), 'MMM d, yyyy');
+              return (
+                <div key={w.id} className="bg-white border border-zinc-200 rounded-2xl overflow-hidden hover:shadow-md transition-shadow">
+                  <div className="flex flex-col sm:flex-row">
+                    {/* Video thumbnail */}
+                    {ytId ? (
+                      <a
+                        href={w.videoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="relative sm:w-64 w-full aspect-video sm:aspect-auto sm:min-h-[160px] bg-zinc-900 shrink-0 group overflow-hidden"
+                      >
+                        <img
+                          src={`https://img.youtube.com/vi/${ytId}/mqdefault.jpg`}
+                          alt={w.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        <div className="absolute inset-0 bg-black/20 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                          <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                            <Play className="w-5 h-5 text-zinc-900 ml-0.5" />
                           </div>
-                          <h3 className="font-semibold text-zinc-900 truncate">{w.title}</h3>
-                          <p className="text-sm text-zinc-500 mt-0.5 line-clamp-2">{w.description}</p>
-                          {w.videoUrl && (
-                            <a
-                              href={w.videoUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline mt-1"
-                            >
-                              <LinkIcon className="w-3 h-3" /> Video link
-                            </a>
-                          )}
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={() => openEdit(w)}
-                            className="p-2 rounded-lg hover:bg-zinc-100 text-zinc-500 hover:text-zinc-900 transition-colors"
-                            title="Edit"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(w.id!)}
-                            disabled={deletingId === w.id}
-                            className="p-2 rounded-lg hover:bg-red-50 text-zinc-400 hover:text-red-600 transition-colors disabled:opacity-40"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                      </a>
+                    ) : (
+                      <div className="sm:w-64 w-full aspect-video sm:aspect-auto sm:min-h-[160px] bg-zinc-100 shrink-0 flex items-center justify-center">
+                        <div className="text-center">
+                          <LayoutDashboard className="w-8 h-8 text-zinc-300 mx-auto mb-1" />
+                          <span className="text-xs text-zinc-400">No video</span>
                         </div>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Content */}
+                    <div className="flex-1 p-5 flex flex-col justify-between min-w-0">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <span className="inline-flex items-center gap-1 text-xs font-medium bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full">
+                            <Calendar className="w-3 h-3" />{formattedDate}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-xs font-medium bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full">
+                            <Clock className="w-3 h-3" />{w.durationMinutes} min
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-xs font-medium bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+                            <Target className="w-3 h-3" />{w.goal}
+                          </span>
+                          {w.completed && (
+                            <span className="text-xs font-medium bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                              ✓ Completed
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="font-semibold text-zinc-900 text-base truncate">{w.title}</h3>
+                        <p className="text-sm text-zinc-500 mt-1 line-clamp-2">{w.description}</p>
+                        {w.videoUrl && (
+                          <a
+                            href={w.videoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline mt-2"
+                          >
+                            <LinkIcon className="w-3 h-3" /> {w.videoUrl}
+                          </a>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 mt-3">
+                        <button
+                          onClick={() => openEdit(w)}
+                          className="p-2 rounded-lg hover:bg-zinc-100 text-zinc-500 hover:text-zinc-900 transition-colors"
+                          title="Edit"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(w.id!)}
+                          disabled={deletingId === w.id}
+                          className="p-2 rounded-lg hover:bg-red-50 text-zinc-400 hover:text-red-600 transition-colors disabled:opacity-40"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
-            );
-          })
+                </div>
+              );
+            })}
+          </div>
         )}
       </main>
 
@@ -396,3 +413,4 @@ export default function AdminDashboard() {
     </div>
   );
 }
+

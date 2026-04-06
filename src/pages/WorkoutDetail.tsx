@@ -3,8 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../components/AuthContext';
 import { db } from '../firebase';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { Workout, markWorkoutComplete } from '../services/workoutService';
-import { ArrowLeft, CheckCircle, Clock, PlayCircle } from 'lucide-react';
+import { Workout, markWorkoutComplete, isFavorited, addFavorite, removeFavorite } from '../services/workoutService';
+import { ArrowLeft, CheckCircle, Clock, PlayCircle, Heart } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { format } from 'date-fns';
 
@@ -16,6 +16,8 @@ export default function WorkoutDetail() {
   const [completed, setCompleted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(false);
+  const [isFav, setIsFav] = useState(false);
+  const [favLoading, setFavLoading] = useState(false);
 
   useEffect(() => {
     if (!user || !id) return;
@@ -37,6 +39,9 @@ export default function WorkoutDetail() {
       setCompleted(docSnap.exists());
     });
 
+    // Check favorite status
+    isFavorited(user.uid, id).then(setIsFav);
+
     return () => {
       unsubWorkout();
       unsubCompletion();
@@ -49,6 +54,25 @@ export default function WorkoutDetail() {
     await markWorkoutComplete(id, user.uid);
     setCompleting(false);
     navigate('/');
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!id || !user) return;
+    setFavLoading(true);
+    try {
+      if (isFav) {
+        await removeFavorite(user.uid, id);
+        setIsFav(false);
+      } else {
+        const source = workout?.userId === user.uid ? 'custom' : 'global';
+        await addFavorite(user.uid, id, source);
+        setIsFav(true);
+      }
+    } catch (err) {
+      console.error('Favorite toggle error:', err);
+    } finally {
+      setFavLoading(false);
+    }
   };
 
   if (loading || !workout) {
@@ -73,6 +97,20 @@ export default function WorkoutDetail() {
           <ArrowLeft className="w-6 h-6 text-zinc-900" />
         </button>
         <h1 className="font-semibold text-zinc-900 flex-1 truncate">{workout.title}</h1>
+        <button
+          onClick={handleToggleFavorite}
+          disabled={favLoading}
+          className="p-2 rounded-full hover:bg-zinc-100 transition-colors"
+          title={isFav ? 'Remove from favorites' : 'Add to favorites'}
+        >
+          <Heart
+            className="w-5 h-5 transition-colors"
+            style={{
+              color: isFav ? '#ef4444' : '#a1a1aa',
+              fill: isFav ? '#ef4444' : 'none',
+            }}
+          />
+        </button>
       </header>
 
       <main className="flex-1 max-w-2xl mx-auto w-full p-6 flex flex-col">
