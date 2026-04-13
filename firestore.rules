@@ -147,8 +147,8 @@ service cloud.firestore {
     }
 
     match /workout_completions/{completionId} {
-      allow read, update, delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+      allow read, delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create, update: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
     }
 
     match /custom_workouts/{workoutId} {
@@ -162,6 +162,27 @@ service cloud.firestore {
       allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
       allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
       allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    // Badges earned by users
+    match /badges_earned/{badgeId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create, update: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+      allow delete: if false; // Badges cannot be revoked from client
+    }
+
+    // Challenges definitions
+    match /challenges/{challengeId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+      // Also allow system seeding (any authenticated user can create system challenges)
+      allow create: if isAuthenticated() && request.resource.data.source == 'system';
+    }
+
+    // Challenge participations
+    match /challenge_participants/{participantId} {
+      allow read, delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create, update: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
     }
   }
 }

@@ -5,11 +5,15 @@ import { db } from '../firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { format, subDays, startOfWeek, endOfWeek, parseISO } from 'date-fns';
 import { Link } from 'react-router-dom';
-import { Activity, CheckCircle, Clock, Flame, PlayCircle, AlertCircle, LayoutDashboard, Trophy, ChevronRight, Dumbbell, Star, ChevronDown, Check } from 'lucide-react';
+import { Activity, CheckCircle, Clock, Flame, PlayCircle, AlertCircle, LayoutDashboard, Trophy, ChevronRight, Dumbbell, Star, ChevronDown, Check, UserCircle, Zap } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { evaluateAndAwardBadges } from '../services/badgeService';
+import { useBadgeNotification } from '../components/BadgeNotification';
+import { fetchChallenges, fetchUserChallenges, Challenge, ChallengeParticipant, seedBuiltInChallenges } from '../services/challengeService';
 
 export default function Home() {
   const { user, profile, logout } = useAuth();
+  const { showBadgeEarned } = useBadgeNotification();
   const [todayWorkouts, setTodayWorkouts] = useState<Workout[]>([]);
   const [yesterdayWorkouts, setYesterdayWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,6 +23,7 @@ export default function Home() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [customWorkouts, setCustomWorkouts] = useState<CustomWorkout[]>([]);
+  const [activeChallenges, setActiveChallenges] = useState<{challenge: Challenge; participation: ChallengeParticipant}[]>([]);
 
   useEffect(() => {
     if (!user || !profile?.goal) return;
@@ -46,6 +51,22 @@ export default function Home() {
         // Fetch user's custom workouts
         const customs = await fetchCustomWorkouts(user.uid);
         setCustomWorkouts(customs.filter(c => !profile.goal || c.goal?.toLowerCase().trim() === profile.goal.toLowerCase().trim()));
+
+        // Evaluate badges (on page load)
+        const newBadges = await evaluateAndAwardBadges(user.uid);
+        newBadges.forEach(b => showBadgeEarned(b.definition));
+
+        // Fetch active challenges
+        await seedBuiltInChallenges();
+        const [allChallenges, userParticipations] = await Promise.all([
+          fetchChallenges(),
+          fetchUserChallenges(user.uid),
+        ]);
+        const participationMap = new Map(userParticipations.map(p => [p.challengeId, p]));
+        const active = allChallenges
+          .filter(c => c.id && participationMap.has(c.id) && !participationMap.get(c.id)!.completed)
+          .map(c => ({ challenge: c, participation: participationMap.get(c.id!)! }));
+        setActiveChallenges(active);
 
       } catch (error: any) {
         console.error('Error fetching workouts:', error);
@@ -129,9 +150,13 @@ export default function Home() {
               Admin
             </Link>
           )}
-          <button onClick={logout} className="text-sm font-medium text-zinc-500 hover:text-zinc-900">
-            Sign out
-          </button>
+          <Link to="/profile" className="p-2 rounded-full hover:bg-zinc-100 transition-colors">
+            {profile?.photoURL ? (
+              <img src={profile.photoURL} alt="" className="w-8 h-8 rounded-full object-cover" />
+            ) : (
+              <UserCircle className="w-6 h-6 text-zinc-500" />
+            )}
+          </Link>
         </div>
       </header>
 
@@ -384,6 +409,44 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {/* Active Challenges */}
+        {activeChallenges.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-purple-500" />
+                <h2 className="text-xl font-semibold text-zinc-900">Active Challenges</h2>
+              </div>
+              <Link to="/profile" className="text-sm font-medium text-zinc-500 hover:text-zinc-900 transition-colors">
+                See all
+              </Link>
+            </div>
+            <div className="space-y-3">
+              {activeChallenges.map(({ challenge, participation }) => {
+                const progressPct = Math.min((participation.progress / challenge.target) * 100, 100);
+                return (
+                  <div key={challenge.id} className="bg-white border border-purple-200 rounded-2xl p-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-semibold text-zinc-900">{challenge.title}</h3>
+                      <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded-full">
+                        {participation.progress}/{challenge.target}
+                      </span>
+                    </div>
+                    <p className="text-sm text-zinc-500 mb-3">{challenge.description}</p>
+                    <div className="h-2 bg-purple-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-purple-500 rounded-full transition-all"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-2">Ends {participation.endDate}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* Workout History Link */}
         <section>

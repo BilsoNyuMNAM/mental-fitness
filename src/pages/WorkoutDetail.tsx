@@ -7,11 +7,15 @@ import { Workout, markWorkoutComplete, isFavorited, addFavorite, removeFavorite 
 import { ArrowLeft, CheckCircle, Clock, PlayCircle, Heart } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { format } from 'date-fns';
+import { evaluateAndAwardBadges } from '../services/badgeService';
+import { updateChallengeProgress } from '../services/challengeService';
+import { useBadgeNotification } from '../components/BadgeNotification';
 
 export default function WorkoutDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { showBadgeEarned, showNotification } = useBadgeNotification();
   const [workout, setWorkout] = useState<Workout | null>(null);
   const [completed, setCompleted] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -51,9 +55,25 @@ export default function WorkoutDetail() {
   const handleComplete = async () => {
     if (!id || !user) return;
     setCompleting(true);
-    await markWorkoutComplete(id, user.uid);
-    setCompleting(false);
-    navigate('/');
+    try {
+      await markWorkoutComplete(id, user.uid);
+
+      // Update challenge progress
+      await updateChallengeProgress(user.uid);
+
+      // Evaluate badges after completion
+      const newBadges = await evaluateAndAwardBadges(user.uid);
+      showNotification('Workout Completed!', 'Great job keeping up the consistency.');
+      
+      newBadges.forEach(b => showBadgeEarned(b.definition));
+
+      navigate('/');
+    } catch (error: any) {
+      console.error('Completion Error:', error);
+      alert('Error during completion: ' + error.message);
+    } finally {
+      setCompleting(false);
+    }
   };
 
   const handleToggleFavorite = async () => {
