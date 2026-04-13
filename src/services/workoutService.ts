@@ -108,6 +108,77 @@ export async function fetchProgressData(userId: string, startDate: string): Prom
   }
 }
 
+export interface DayStatus {
+  date: string;       // yyyy-MM-dd
+  label: string;      // display label (day name or M/d)
+  hasWorkout: boolean;
+  isToday: boolean;
+}
+
+/** Fetch per-day workout status for a date range */
+export async function fetchProgressDataRange(
+  userId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<{ days: DayStatus[]; streak: number }> {
+  try {
+    const startStr = format(startDate, 'yyyy-MM-dd');
+    const endStr = format(endDate, 'yyyy-MM-dd');
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+
+    const completionsRef = collection(db, 'workout_completions');
+    const qCompletions = query(
+      completionsRef,
+      where('userId', '==', userId),
+      where('date', '>=', startStr),
+      where('date', '<=', endStr)
+    );
+    const completionsSnap = await getDocs(qCompletions);
+
+    const workoutDates = new Set<string>();
+    completionsSnap.docs.forEach(doc => {
+      workoutDates.add(doc.data().date);
+    });
+
+    const days: DayStatus[] = [];
+    let current = new Date(startDate);
+    while (current <= endDate) {
+      const dateStr = format(current, 'yyyy-MM-dd');
+      days.push({
+        date: dateStr,
+        label: format(current, 'M/d'),
+        hasWorkout: workoutDates.has(dateStr),
+        isToday: dateStr === todayStr,
+      });
+      current = new Date(current.getTime() + 86400000);
+    }
+
+    // Calculate current streak
+    let streak = 0;
+    const allCompletionsQuery = query(
+      completionsRef,
+      where('userId', '==', userId)
+    );
+    const allSnap = await getDocs(allCompletionsQuery);
+    const allDates = new Set<string>();
+    allSnap.docs.forEach(doc => allDates.add(doc.data().date));
+
+    let checkDate = new Date();
+    if (!allDates.has(format(checkDate, 'yyyy-MM-dd'))) {
+      checkDate = subDays(checkDate, 1);
+    }
+    while (allDates.has(format(checkDate, 'yyyy-MM-dd'))) {
+      streak++;
+      checkDate = subDays(checkDate, 1);
+    }
+
+    return { days, streak };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'workout_completions');
+    return { days: [], streak: 0 };
+  }
+}
+
 export interface CompletedWorkout extends Workout {
   completionDate: string;
   completionId: string;

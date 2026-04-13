@@ -1,20 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useAuth } from '../components/AuthContext';
-import { fetchTodayWorkouts, fetchProgressData, fetchCustomWorkouts, Workout, CustomWorkout } from '../services/workoutService';
+import { fetchTodayWorkouts, fetchProgressDataRange, fetchCustomWorkouts, Workout, CustomWorkout, DayStatus } from '../services/workoutService';
 import { db } from '../firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { format, subDays, parseISO } from 'date-fns';
+import { format, subDays, startOfWeek, endOfWeek, parseISO } from 'date-fns';
 import { Link } from 'react-router-dom';
-import { Activity, CheckCircle, Clock, Flame, PlayCircle, AlertCircle, LayoutDashboard, Trophy, ChevronRight, Dumbbell, Star } from 'lucide-react';
+import { Activity, CheckCircle, Clock, Flame, PlayCircle, AlertCircle, LayoutDashboard, Trophy, ChevronRight, Dumbbell, Star, ChevronDown, Check } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function Home() {
   const { user, profile, logout } = useAuth();
   const [todayWorkouts, setTodayWorkouts] = useState<Workout[]>([]);
   const [yesterdayWorkouts, setYesterdayWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
-  const [progressData, setProgressData] = useState<{ date: string; completed: number }[]>([]);
+  const [progressDays, setProgressDays] = useState<DayStatus[]>([]);
+  const [streak, setStreak] = useState(0);
+  const [progressRange, setProgressRange] = useState<'present_week' | 'last_week' | '30_days'>('present_week');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [customWorkouts, setCustomWorkouts] = useState<CustomWorkout[]>([]);
 
   useEffect(() => {
@@ -34,10 +37,11 @@ export default function Home() {
         const yesWorkouts = await fetchTodayWorkouts(user.uid, yesterdayStr, profile.goal);
         setYesterdayWorkouts(yesWorkouts);
 
-        // Fetch last 7 days for progress chart
-        const last7Days = format(subDays(new Date(), 6), 'yyyy-MM-dd');
-        const chartData = await fetchProgressData(user.uid, last7Days);
-        setProgressData(chartData);
+        // Fetch progress data based on selected range
+        const { start, end } = getDateRange(progressRange);
+        const progressResult = await fetchProgressDataRange(user.uid, start, end);
+        setProgressDays(progressResult.days);
+        setStreak(progressResult.streak);
 
         // Fetch user's custom workouts
         const customs = await fetchCustomWorkouts(user.uid);
@@ -51,7 +55,46 @@ export default function Home() {
     };
 
     fetchWorkouts();
-  }, [user, profile]);
+  }, [user, profile, progressRange]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  function getDateRange(range: 'present_week' | 'last_week' | '30_days') {
+    const today = new Date();
+    if (range === 'present_week') {
+      return { start: startOfWeek(today, { weekStartsOn: 0 }), end: endOfWeek(today, { weekStartsOn: 0 }) };
+    } else if (range === 'last_week') {
+      const lastWeekDay = subDays(startOfWeek(today, { weekStartsOn: 0 }), 1);
+      return { start: startOfWeek(lastWeekDay, { weekStartsOn: 0 }), end: endOfWeek(lastWeekDay, { weekStartsOn: 0 }) };
+    } else {
+      return { start: subDays(today, 29), end: today };
+    }
+  }
+
+  const rangeLabels: Record<string, string> = {
+    present_week: 'Present week',
+    last_week: 'Last week',
+    '30_days': '30 days',
+  };
+
+  // Compute stats from progressDays
+  const completedCount = progressDays.filter(d => d.hasWorkout).length;
+  const today = new Date();
+  const todayStr = format(today, 'yyyy-MM-dd');
+  // Only count past days (not future days) as rest days
+  const pastDays = progressDays.filter(d => d.date <= todayStr);
+  const restDayCount = pastDays.filter(d => !d.hasWorkout).length;
+  const totalDaysInRange = pastDays.length;
+  const completionPct = totalDaysInRange > 0 ? Math.round((completedCount / totalDaysInRange) * 100) : 0;
 
   if (loading) {
     return (
@@ -220,40 +263,125 @@ export default function Home() {
           </section>
         )}
 
-        {/* Progress Snapshot */}
+        {/* Progress Section */}
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Flame className="w-5 h-5 text-orange-500" />
-            <h2 className="text-xl font-semibold text-zinc-900">7-Day Progress</h2>
-          </div>
-          <div className="bg-white border border-zinc-200 rounded-2xl p-6 h-64">
-            {progressData.reduce((sum, d) => sum + d.completed, 0) === 0 ? (
-              <div className="w-full h-full flex flex-col items-center justify-center text-center">
-                <Flame className="w-8 h-8 text-zinc-200 mb-3" />
-                <p className="text-sm text-zinc-500">No progress data available yet.</p>
-                <p className="text-xs text-zinc-400 mt-1">Complete a workout to see your progress here.</p>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Flame className="w-5 h-5 text-orange-500" />
+              <h2 className="text-xl font-semibold text-zinc-900">Progress</h2>
+            </div>
+            <div className="flex items-center gap-3">
+              {/* Streak Badge */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-orange-200 bg-orange-50 text-orange-600 text-sm font-medium">
+                <Flame className="w-3.5 h-3.5" />
+                {streak} day streak
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={progressData}>
-                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#71717a' }} dy={10} />
-                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#a1a1aa' }} width={30} domain={[0, 'dataMax + 1']} />
-                  <Tooltip 
-                    cursor={{ stroke: '#e4e4e7', strokeWidth: 2 }}
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                    formatter={(value: number) => [`${value} workout${value !== 1 ? 's' : ''}`, 'Completed']}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="completed" 
-                    stroke="#18181b" 
-                    strokeWidth={3} 
-                    dot={{ r: 4, fill: '#18181b', strokeWidth: 0 }} 
-                    activeDot={{ r: 6, fill: '#18181b', stroke: '#fff', strokeWidth: 2 }} 
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
+              {/* Dropdown */}
+              <div ref={dropdownRef} className="relative">
+                <button
+                  onClick={() => setDropdownOpen(!dropdownOpen)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-800 transition-colors"
+                >
+                  {rangeLabels[progressRange]}
+                  <ChevronDown className={`w-4 h-4 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {dropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-44 bg-white border border-zinc-200 rounded-xl shadow-lg overflow-hidden z-20">
+                    {(['present_week', 'last_week', '30_days'] as const).map(option => (
+                      <button
+                        key={option}
+                        onClick={() => { setProgressRange(option); setDropdownOpen(false); }}
+                        className={`w-full text-left px-4 py-2.5 text-sm font-medium flex items-center justify-between transition-colors ${
+                          progressRange === option ? 'bg-zinc-50 text-zinc-900' : 'text-zinc-600 hover:bg-zinc-50'
+                        }`}
+                      >
+                        {rangeLabels[option]}
+                        {progressRange === option && <Check className="w-4 h-4 text-orange-500" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[#faf8f5] border border-zinc-200/60 rounded-2xl p-6">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-3 gap-3 mb-8">
+              <div className="bg-white/80 rounded-xl p-4 text-center border border-zinc-100">
+                <div className="text-2xl font-bold text-orange-500">{completedCount}</div>
+                <div className="text-xs text-zinc-500 mt-1">completed</div>
+              </div>
+              <div className="bg-white/80 rounded-xl p-4 text-center border border-zinc-100">
+                <div className="text-2xl font-bold text-zinc-400">{restDayCount}</div>
+                <div className="text-xs text-zinc-500 mt-1">rest days</div>
+              </div>
+              <div className="bg-white/80 rounded-xl p-4 text-center border border-zinc-100">
+                <div className="text-2xl font-bold text-zinc-400">{completionPct}%</div>
+                <div className="text-xs text-zinc-500 mt-1">completion</div>
+              </div>
+            </div>
+
+            {/* Workout Timeline */}
+            <div className="relative">
+              <div className="flex items-end gap-0 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+                {progressDays.map((day, idx) => {
+                  const dayOfWeek = format(parseISO(day.date), 'EEE');
+                  const isFuture = day.date > todayStr;
+                  // For weekly views show day names, for 30 days show date labels at intervals
+                  const showLabel = progressRange === '30_days'
+                    ? (idx % 5 === 0 || day.isToday)
+                    : true;
+                  const label = progressRange === '30_days'
+                    ? day.label
+                    : dayOfWeek;
+
+                  return (
+                    <div
+                      key={day.date}
+                      className="flex flex-col items-center"
+                      style={{ minWidth: progressRange === '30_days' ? '28px' : '0', flex: '1 1 0' }}
+                    >
+                      {/* Checkmark or dot */}
+                      <div className="h-6 flex items-center justify-center mb-2">
+                        {isFuture ? (
+                          <span />
+                        ) : day.hasWorkout ? (
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M3 8.5L6.5 12L13 4" stroke="#ea580c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : (
+                          <div className="w-2 h-2 rounded-full bg-zinc-300" />
+                        )}
+                      </div>
+                      {/* Label */}
+                      {showLabel ? (
+                        <span className={`text-[10px] leading-tight ${
+                          day.isToday
+                            ? 'text-orange-500 font-bold'
+                            : 'text-zinc-400 font-medium'
+                        }`}>
+                          {day.isToday && progressRange !== '30_days' ? 'Today' : label}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] leading-tight">&nbsp;</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Legend */}
+              <div className="flex items-center justify-end gap-4 mt-3">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-sm bg-orange-500" />
+                  <span className="text-[11px] text-zinc-500">workout</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-sm bg-zinc-300" />
+                  <span className="text-[11px] text-zinc-500">rest day</span>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
